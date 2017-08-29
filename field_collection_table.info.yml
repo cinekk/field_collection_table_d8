@@ -1,0 +1,7 @@
+name: Field Collection Table
+type: module
+description: Provides a field-collection table formatter.
+package: Field types
+core: 7.x
+dependencies:
+  - field_collection
