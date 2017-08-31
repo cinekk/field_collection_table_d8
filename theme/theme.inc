@@ -1,5 +1,9 @@
 <?php
 
+use Drupal\Component\Utility\Html;
+use Drupal\Core\Template\Attribute;
+use Drupal\Core\Render\Element;
+
 /**
  * Print a single row of multiple fields.
  */
@@ -43,6 +47,113 @@ function _field_collection_table_sort_items_widget_helper($a, $b) {
   $a_weight = (is_array($a) && isset($a['widget']['weight']) ? $a['widget']['weight'] : 0);
   $b_weight = (is_array($b) && isset($b['widget']['weight']) ? $b['widget']['weight'] : 0);
   return $a_weight - $b_weight;
+}
+
+
+/**
+ * Prepares variables for individual form element templates.
+ *
+ * Default template: field-multiple-value-form.html.twig.
+ *
+ * Combines multiple values into a table with drag-n-drop reordering.
+ *
+ * @param array $variables
+ *   An associative array containing:
+ *   - element: A render element representing the form element.
+ */
+function field_collection_table_preprocess_field_collection_table_multiple_value_fields(&$variables) {
+  $element = $variables['element'];
+  $variables['multiple'] = $element['#cardinality_multiple'];
+
+  if ($variables['multiple']) {
+    $table_id = Html::getUniqueId($element['#field_name'] . '_values');
+    $order_class = $element['#field_name'] . '-delta-order';
+    $header_attributes = new Attribute(['class' => ['label']]);
+    if (!empty($element['#required'])) {
+      $header_attributes['class'][] = 'js-form-required';
+      $header_attributes['class'][] = 'form-required';
+    }
+    $header = [
+      [
+        'data' => [
+          '#prefix' => '<h4' . $header_attributes . '>',
+          '#markup' => $element['#title'],
+          '#suffix' => '</h4>',
+        ],
+        'colspan' => 2,
+        'class' => ['field-label'],
+      ],
+      t('Order', [], ['context' => 'Sort order']),
+    ];
+    $rows = [];
+
+    // Sort items according to '_weight' (needed when the form comes back after
+    // preview or failed validation).
+    $items = [];
+    $variables['button'] = [];
+    foreach (Element::children($element) as $key) {
+      if ($key === 'add_more') {
+        $variables['button'] = &$element[$key];
+      }
+      else {
+        $items[] = &$element[$key];
+      }
+    }
+    usort($items, '_field_multiple_value_form_sort_helper');
+
+    // Add the items as table rows.
+    foreach ($items as $item) {
+      $item['_weight']['#attributes']['class'] = [$order_class];
+
+      // Remove weight form element from item render array so it can be rendered
+      // in a separate table column.
+      $delta_element = $item['_weight'];
+      unset($item['_weight']);
+
+      $cells = [
+        ['data' => '', 'class' => ['field-multiple-drag']],
+        ['data' => $item],
+        ['data' => $delta_element, 'class' => ['delta-order']],
+      ];
+      $rows[] = [
+        'data' => $cells,
+        'class' => ['draggable'],
+      ];
+    }
+
+    $variables['table'] = [
+      '#type' => 'table',
+      '#header' => $header,
+      '#rows' => $rows,
+      '#attributes' => [
+        'id' => $table_id,
+        'class' => ['field-multiple-table'],
+      ],
+      '#tabledrag' => [
+        [
+          'action' => 'order',
+          'relationship' => 'sibling',
+          'group' => $order_class,
+        ],
+      ],
+    ];
+
+    if (!empty($element['#description'])) {
+      $description_id = $element['#attributes']['aria-describedby'];
+      $description_attributes['id'] = $description_id;
+      $variables['description']['attributes'] = new Attribute($description_attributes);
+      $variables['description']['content'] = $element['#description'];
+
+      // Add the description's id to the table aria attributes.
+      $variables['table']['#attributes']['aria-describedby'] = $element['#attributes']['aria-describedby'];
+    }
+  }
+  else {
+    $variables['elements'] = [];
+    foreach (Element::children($element) as $key) {
+      $variables['elements'][] = $element[$key];
+    }
+  }
 }
 
 /**
