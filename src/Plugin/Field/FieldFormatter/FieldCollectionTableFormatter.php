@@ -17,22 +17,23 @@ use Drupal\field\Entity\FieldConfig;
  * )
  */
 class FieldCollectionTableFormatter extends FormatterBase {
+
+  /**
+   * {@inheritdoc}
+   */
+  public function settingsSummary() {
+    $summary = [];
+    $settings = $this->getSettings();
+
+    $summary[] = t('Summary of the table settings');
+
+    return $summary;
+  }
+
   /**
    * {@inheritdoc}
    */
   public function viewElements(FieldItemListInterface $items, $langcode) {
-
-    /**
-     * {@inheritdoc}
-     */
-    public function settingsSummary() {
-      $summary = [];
-      $settings = $this->getSettings();
-
-      $summary[] = t('Summary of the table settings');
-
-      return $summary;
-    }
 
     /**
      * Get config of field to get order of fields.
