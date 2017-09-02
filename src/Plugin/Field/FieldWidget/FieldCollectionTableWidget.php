@@ -77,21 +77,16 @@ class FieldCollectionTableWidget extends WidgetBase {
     // after the form is built, so that we catch changes in the form structure
     // performed in alter() hooks.
 //    $elements['#after_build'][] = [get_class($this), 'afterBuild'];
-//    $elements['#field_name'] = $field_name;
-    $elements['#field_parents'] = $parents;
-    // Enforce the structure of submitted values.
-    $elements['#parents'] = array_merge($parents, [$field_name]);
-    // Most widgets need their internal structure preserved in submitted values.
-//    $elements += ['#tree' => TRUE];
 
-    return [
+
+    $return = [
       '#type' => 'table',
+      // Most widgets need their internal structure preserved in submitted values.
       '#tree' => TRUE,
-      '#prefix' => '<div id="bicz-pliz">',
+      '#prefix' => '<div id="ajax-table-wrapper">',
       '#suffix' => '</div>',
       '#cardinality' => -1,
-      // Assign a different parent, to keep the main id for the widget itself.
-      '#parents' => array_merge($parents, [$field_name . '_wrapper']),
+      '#max_delta' => $field_state['items_count'],
       '#field_parents' => $parents,
       '#attributes' => [
         'class' => [
@@ -108,6 +103,8 @@ class FieldCollectionTableWidget extends WidgetBase {
         ],
       ]
     ] + $elements;
+
+    return $return;
   }
 
   /**
@@ -183,43 +180,33 @@ class FieldCollectionTableWidget extends WidgetBase {
           ];
         }
 
-        $elements[$delta] = ['data' => $element];
+//        $elements[$delta] = ['data' => $element];
+        $elements[$delta] = $element;
       }
     }
 
     if ($elements) {
-//      $elements += [
-//        '#theme' => 'field_multiple_value_form',
-//        '#field_name' => $field_name,
-//        '#cardinality' => $cardinality,
-//        '#cardinality_multiple' => $this->fieldDefinition->getFieldStorageDefinition()->isMultiple(),
-//        '#required' => $this->fieldDefinition->isRequired(),
-//        '#title' => $title,
-//        '#description' => $description,
-//        '#max_delta' => $max,
-//      ];
-
       // Add 'add more' button, if not working with a programmed form.
-      if ($cardinality == FieldStorageDefinitionInterface::CARDINALITY_UNLIMITED && !$form_state->isProgrammed()) {
-        $id_prefix = implode('-', array_merge($parents, [$field_name]));
-        $wrapper_id = Html::getUniqueId($id_prefix . '-add-more-wrapper');
-//        $elements['#prefix'] = '<div id="' . $wrapper_id . '">';
-//        $elements['#suffix'] = '</div>';
-
-        $elements['add_more']['data'][] = [
-          '#type' => 'submit',
-          '#name' => strtr($id_prefix, '-', '_') . '_add_more',
-          '#value' => t('Add another item'),
-          '#attributes' => ['class' => ['field-add-more-submit']],
-          '#limit_validation_errors' => [array_merge($parents, [$field_name])],
-          '#submit' => ['::addMoreSubmit'],
-          '#ajax' => [
-            'callback' => '::addMoreAjax',
-            'wrapper' => 'bicz-pliz',
-            'effect' => 'fade',
-          ],
-        ];
-      }
+//      if ($cardinality == FieldStorageDefinitionInterface::CARDINALITY_UNLIMITED && !$form_state->isProgrammed()) {
+//        $id_prefix = implode('-', array_merge($parents, [$field_name]));
+//        $wrapper_id = Html::getUniqueId($id_prefix . '-add-more-wrapper');
+////        $elements['#prefix'] = '<div id="' . $wrapper_id . '">';
+////        $elements['#suffix'] = '</div>';
+//
+//        $elements['add_more']['data'][] = [
+//          '#type' => 'submit',
+//          '#name' => strtr($id_prefix, '-', '_') . '_add_more',
+//          '#value' => t('Add another item'),
+//          '#attributes' => ['class' => ['field-add-more-submit']],
+//          '#limit_validation_errors' => [array_merge($parents, [$field_name])],
+//          '#submit' => ['::addMoreSubmit'],
+//          '#ajax' => [
+//            'callback' => '::addMoreAjax',
+//            'wrapper' => '',
+//            'effect' => 'fade',
+//          ],
+//        ];
+//      }
     }
 
     return $elements;
@@ -265,7 +252,8 @@ class FieldCollectionTableWidget extends WidgetBase {
     $parents = array_merge($element['#field_parents'], [$field_name, $delta]);
 
     $element += [
-//      '#element_validate' => [[static::class, 'validate']],
+      '#type' => 'item',
+      '#element_validate' => ['Drupal\field_collection_table\Plugin\Field\FieldWidget\FieldCollectionTableWidget::validate'],
       '#parents' => $parents,
       '#field_name' => $field_name,
     ];
@@ -291,11 +279,20 @@ class FieldCollectionTableWidget extends WidgetBase {
     foreach (Element::children($element) as $item) {
       // Reduce the size so it fits the screen...
       $element[$item]['widget'][0]['value']['#size'] = 0;
+//      $element[$item]['#parents'] = [$field_name, $item];
+      $element[$item]['widget']['#parents'] = [$field_name, $delta, $item];
       $weight = $element[$item]['#weight'];
-      $row[$weight] = ['data' => $element[$item]];
+      //$row[$weight] = ['data' => $element[$item]];
+      $row[$weight] = $element[$item];
     }
 
     ksort($row);
+
+    $row['#element_validate'] = ['Drupal\field_collection_table\Plugin\Field\FieldWidget\FieldCollectionTableWidget::validate'];
+    $row['#field_name'] = $field_name;
+    $row['#field_parents'] = $form['#parents'];
+    $row['#delta'] = $delta;
+    $row['#field_collection_required_elements'] = $element['#field_collection_required_elements'];
 
     if (empty($element['#required'])) {
 //      $element['#after_build'][] = [static::class, 'delayRequiredValidation'];
@@ -311,9 +308,6 @@ class FieldCollectionTableWidget extends WidgetBase {
     if ($cardinality == FieldStorageDefinitionInterface::CARDINALITY_UNLIMITED) {
       if ($is_first) {
         $id_prefix = implode('-', array_merge($parents, [$field_name]));
-//        $wrapper_id = Html::getUniqueId($id_prefix . '-add-more-wrapper');
-        //        $elements['#prefix'] = '<div id="' . $wrapper_id . '">';
-        //        $elements['#suffix'] = '</div>';
 
         $action = [
           '#type' => 'actions',
@@ -327,7 +321,7 @@ class FieldCollectionTableWidget extends WidgetBase {
             '#submit' => ['Drupal\field_collection_table\Plugin\Field\FieldWidget\FieldCollectionTableWidget::addMoreSubmit'],
             '#ajax' => [
               'callback' => 'Drupal\field_collection_table\Plugin\Field\FieldWidget\FieldCollectionTableWidget::addMoreAjax',
-              'wrapper' => 'bicz-pliz',
+              'wrapper' => 'ajax-table-wrapper',
               'effect' => 'fade',
             ],
           ],
@@ -356,10 +350,72 @@ class FieldCollectionTableWidget extends WidgetBase {
           ],
         ];
       }
-      $row[10000]['data'] = $action;
+//      $row[10000]['data'] = $action;
+      $row[10000] = $action;
     }
 
     return $row;
+  }
+
+  /**
+   * FAPI validation of an individual field collection element.
+   */
+  public static function validate($element, FormStateInterface $form_state, $form) {
+    $field_parents = $element['#field_parents'];
+    $field_name = $element['#field_name'];
+
+    $field_state = static::getWidgetState($field_parents, $field_name, $form_state);
+
+    $field_collection_item = $field_state['entity'][$element['#delta']];
+
+    $display = entity_get_form_display('field_collection_item', $field_name, 'default');
+    $display->extractFormValues($field_collection_item, $element, $form_state);
+
+    // Now validate required elements if the entity is not empty.
+    if (!$field_collection_item->isEmpty() && !empty($element['#field_collection_required_elements'])) {
+      foreach ($element['#field_collection_required_elements'] as &$elements) {
+        // Copied from \Drupal\Core\Form\FormValidator::doValidateForm().
+        // #1676206: Modified to support options widget.
+        if (isset($elements['#needs_validation'])) {
+          $is_empty_multiple = (!count($elements['#value']));
+          $is_empty_string = (is_string($elements['#value']) && Unicode::strlen(trim($elements['#value'])) == 0);
+          $is_empty_value = ($elements['#value'] === 0);
+          $is_empty_option = (isset($elements['#options']['_none']) && $elements['#value'] == '_none');
+
+          if ($is_empty_multiple || $is_empty_string || $is_empty_value || $is_empty_option) {
+            if (isset($elements['#required_error'])) {
+              $form_state->setError($elements, $elements['#required_error']);
+            }
+            else if (isset($elements['#title'])) {
+              $form_state->setError($elements, t('@name field is required.', ['@name' => $elements['#title']]));
+            }
+            else {
+              $form_state->setError($elements);
+            }
+          }
+        }
+      }
+    }
+
+    // Only if the form is being submitted, finish the collection entity and
+    // prepare it for saving.
+    if ($form_state->isSubmitted() && !$form_state->hasAnyErrors()) {
+      // Load initial form values into $item, so any other form values below the
+      // same parents are kept.
+      $field = NestedArray::getValue($form_state->getValues(), $element['#parents']);
+
+      // Set the _weight if it is a multiple field.
+      $element_widget = NestedArray::getValue($form, array_slice($element['#array_parents'], 0, -1));
+      if (isset($element['_weight']) && $element_widget['#cardinality_multiple']) {
+        $field['_weight'] = $element['_weight']['#value'];
+      }
+
+      // Put the field collection field in $field['entity'], so
+      // it is saved with the host entity via FieldCollection->preSave() / field
+      // API if it is not empty.
+      $field['entity'] = $field_collection_item;
+      $form_state->setValue($element['#parents'], $field);
+    }
   }
 
   /**
@@ -369,7 +425,7 @@ class FieldCollectionTableWidget extends WidgetBase {
     $button = $form_state->getTriggeringElement();
 
     // Go one level up in the form, to the widgets container.
-    $element = NestedArray::getValue($form, array_slice($button['#array_parents'], 0, -5));
+    $element = NestedArray::getValue($form, array_slice($button['#array_parents'], 0, -4));
     $field_name = 'field_skladniki';
 //    $field_name = $element['#field_name'];
 //    $parents = $element['#field_parents'];
@@ -393,7 +449,7 @@ class FieldCollectionTableWidget extends WidgetBase {
     $button = $form_state->getTriggeringElement();
 
     // Go one level up in the form, to the widgets container.
-    $element = NestedArray::getValue($form, array_slice($button['#array_parents'], 0, -5));
+    $element = NestedArray::getValue($form, array_slice($button['#array_parents'], 0, -3));
 
     // Ensure the widget allows adding additional items.
     if ($element['#cardinality'] != FieldStorageDefinitionInterface::CARDINALITY_UNLIMITED) {
