@@ -162,6 +162,9 @@ class FieldCollectionTableWidget extends WidgetBase {
         ];
       }
 
+      // Pass the number of items.
+      $element['#max_delta'] = $max;
+
       $element = $this->formSingleElement($items, $delta, $element, $form, $form_state);
 
       if ($element) {
@@ -180,7 +183,6 @@ class FieldCollectionTableWidget extends WidgetBase {
           ];
         }
 
-//        $elements[$delta] = ['data' => $element];
         $elements[$delta] = $element;
       }
     }
@@ -274,15 +276,12 @@ class FieldCollectionTableWidget extends WidgetBase {
     $display = entity_get_form_display('field_collection_item', $field_name, 'default');
     $display->buildForm($field_collection_item, $element, $form_state);
 
-    $header = [];
     $row = [];
     foreach (Element::children($element) as $item) {
       // Reduce the size so it fits the screen...
       $element[$item]['widget'][0]['value']['#size'] = 0;
-//      $element[$item]['#parents'] = [$field_name, $item];
       $element[$item]['widget']['#parents'] = [$field_name, $delta, $item];
       $weight = $element[$item]['#weight'];
-      //$row[$weight] = ['data' => $element[$item]];
       $row[$weight] = $element[$item];
     }
 
@@ -301,7 +300,7 @@ class FieldCollectionTableWidget extends WidgetBase {
       $form['#attributes']['novalidate'] = 'novalidate';
     }
 
-    $is_first = TRUE;
+    $is_first = $delta >= $element['#max_delta'];
 
     // Put the remove button on unlimited cardinality field collection fields.
     $cardinality = $this->fieldDefinition->getFieldStorageDefinition()->getCardinality();
@@ -315,7 +314,7 @@ class FieldCollectionTableWidget extends WidgetBase {
           'add_button' => [
             '#type' => 'submit',
             '#name' => strtr($id_prefix, '-', '_') . '_add_more',
-            '#value' => t('Add another item'),
+            '#value' => t('Add'),
             '#attributes' => ['class' => ['field-add-more-submit']],
             '#limit_validation_errors' => [array_merge($parents, [$field_name])],
             '#submit' => ['Drupal\field_collection_table\Plugin\Field\FieldWidget\FieldCollectionTableWidget::addMoreSubmit'],
@@ -350,7 +349,6 @@ class FieldCollectionTableWidget extends WidgetBase {
           ],
         ];
       }
-//      $row[10000]['data'] = $action;
       $row[10000] = $action;
     }
 
