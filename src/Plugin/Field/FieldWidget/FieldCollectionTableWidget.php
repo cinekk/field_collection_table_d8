@@ -10,6 +10,7 @@ use Drupal\Core\Field\FieldStorageDefinitionInterface;
 use Drupal\Core\Field\WidgetBase;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Render\Element;
+use Drupal\field\Entity\FieldConfig;
 
 
 /**
@@ -73,11 +74,11 @@ class FieldCollectionTableWidget extends WidgetBase {
       $elements = $this->formMultipleElements($items, $form, $form_state);
     }
 
+
     // Populate the 'array_parents' information in $form_state->get('field')
     // after the form is built, so that we catch changes in the form structure
     // performed in alter() hooks.
 //    $elements['#after_build'][] = [get_class($this), 'afterBuild'];
-
 
     $return = [
       '#type' => 'table',
@@ -88,6 +89,7 @@ class FieldCollectionTableWidget extends WidgetBase {
       '#cardinality' => -1,
       '#max_delta' => $field_state['items_count'],
       '#field_parents' => $parents,
+      '#field_name' => $field_name,
       '#attributes' => [
         'class' => [
           'field--type-' . Html::getClass($this->fieldDefinition->getType()),
@@ -95,13 +97,12 @@ class FieldCollectionTableWidget extends WidgetBase {
           'field--widget-' . Html::getClass($this->getPluginId()),
         ],
       ],
-      '#header' => ['1', '2', '3'],
       '#attached' => [
         'library' => [
           'core/jquery.form',
           'core/drupal.ajax',
         ],
-      ]
+      ],
     ] + $elements;
 
     return $return;
@@ -138,8 +139,31 @@ class FieldCollectionTableWidget extends WidgetBase {
     $description = FieldFilteredMarkup::create(\Drupal::token()->replace($this->fieldDefinition->getDescription()));
 
     $elements = [];
+    $header = [];
 
     for ($delta = 0; $delta <= $max; $delta++) {
+      // Generate the header of the table.
+      if ($delta == 0) {
+        $field_collection_item = $items[$delta]->getFieldCollectionItem(TRUE);
+
+        $f = [];
+
+        $display = entity_get_form_display('field_collection_item', $field_name, 'default');
+        $display->buildForm($field_collection_item, $f, $form_state);
+
+        foreach ($field_collection_item->getFieldDefinitions() as $fieldname => $field_definition) {
+          if (!$field_definition instanceof FieldConfig) {
+            continue;
+          }
+
+          $weight = $f[$fieldname]['#weight'];
+
+          $header[$weight] = $field_definition->getLabel();
+        }
+      }
+
+      ksort($header);
+
       // Add a new empty item if it doesn't exist yet at this delta.
       if (!isset($items[$delta])) {
         $items->appendItem();
@@ -186,6 +210,8 @@ class FieldCollectionTableWidget extends WidgetBase {
         $elements[$delta] = $element;
       }
     }
+
+    $elements['#header'] = $header;
 
     if ($elements) {
       // Add 'add more' button, if not working with a programmed form.
@@ -278,9 +304,8 @@ class FieldCollectionTableWidget extends WidgetBase {
 
     $row = [];
     foreach (Element::children($element) as $item) {
-      // Reduce the size so it fits the screen...
-      $element[$item]['widget'][0]['value']['#size'] = 0;
       $element[$item]['widget']['#parents'] = [$field_name, $delta, $item];
+      $element[$item]['#attributes']['class'][] = 'recipes-add__table-value';
       $weight = $element[$item]['#weight'];
       $row[$weight] = $element[$item];
     }
@@ -291,7 +316,8 @@ class FieldCollectionTableWidget extends WidgetBase {
     $row['#field_name'] = $field_name;
     $row['#field_parents'] = $form['#parents'];
     $row['#delta'] = $delta;
-    $row['#field_collection_required_elements'] = $element['#field_collection_required_elements'];
+    $row['#field_collection_required_elements'] = isset($element['#field_collection_required_elements']) ? $element['#field_collection_required_elements'] : [];
+    $row['#attributes']['class'][] = 'recipes-add__table-row';
 
     if (empty($element['#required'])) {
 //      $element['#after_build'][] = [static::class, 'delayRequiredValidation'];
@@ -343,7 +369,7 @@ class FieldCollectionTableWidget extends WidgetBase {
               'callback' => [$this, 'ajaxRemove'],
               'options' => $options,
               'effect' => 'fade',
-              'wrapper' => $form['#wrapper_id'],
+              'wrapper' => 'ajax-table-wrapper',
             ],
             '#weight' => 1000,
           ],
@@ -478,6 +504,105 @@ class FieldCollectionTableWidget extends WidgetBase {
     // to return the parent element.
     $button = $form_state->getTriggeringElement();
     return NestedArray::getValue($form, array_slice($button['#array_parents'], 0, -3));
+  }
+
+  /**
+   * Submit callback to remove an item from the field UI multiple wrapper.
+   *
+   * When a remove button is submitted, we need to find the item that it
+   * referenced and delete it. Since field UI has the deltas as a straight
+   * unbroken array key, we have to renumber everything down. Since we do this
+   * we *also* need to move all the deltas around in the $form_state values,
+   * $form_state input, and $form_state field_storage so that user changed
+   * values follow. This is a bit of a complicated process.
+   */
+  public static function removeSubmit($form, FormStateInterface $form_state) {
+    $button = $form_state->getTriggeringElement();
+    $delta = $button['#delta'];
+
+    // Where in the form we'll find the parent element.
+    $address = array_slice($button['#array_parents'], 0, -3);
+    $address_state = array_slice($button['#parents'], 0, -3);
+
+    // Go one level up in the form, to the widgets container.
+    $parent_element = NestedArray::getValue($form, array_merge($address, []));
+
+    $field_name = $parent_element['#field_name'];
+    $parents = $parent_element['#field_parents'];
+
+    $field_state = static::getWidgetState($parents, $field_name, $form_state);
+
+    // Go ahead and renumber everything from our delta to the last
+    // item down one. This will overwrite the item being removed.
+    for ($i = $delta; $i <= $field_state['items_count']; $i++) {
+      $old_element_address = array_merge($address, [$i + 1]);
+      $old_element_state_address = array_merge($address_state, [$i + 1]);
+      $new_element_state_address = array_merge($address_state, [$i]);
+
+      $moving_element = NestedArray::getValue($form, $old_element_address);
+
+      $moving_element_value = NestedArray::getValue($form_state->getValues(), $old_element_state_address);
+      $moving_element_input = NestedArray::getValue($form_state->getUserInput(), $old_element_state_address);
+      $moving_element_field = NestedArray::getValue($form_state->get('field_storage'), array_merge(['#parents'], $address));
+
+      // Tell the element where it's being moved to.
+      $moving_element['#parents'] = $new_element_state_address;
+
+      // Move the element around.
+      $form_state->setValueForElement($moving_element, $moving_element_value);
+      $user_input = $form_state->getUserInput();
+      NestedArray::setValue($user_input, $moving_element['#parents'], $moving_element_input);
+      $form_state->setUserInput($user_input);
+      NestedArray::setValue($form_state->get('field_storage'), array_merge(['#parents'], $moving_element['#parents']), $moving_element_field);
+
+      // Move the entity in our saved state.
+      if (isset($field_state['entity'][$i + 1])) {
+        $field_state['entity'][$i] = $field_state['entity'][$i + 1];
+      }
+      else {
+        unset($field_state['entity'][$i]);
+      }
+    }
+
+    // Then remove the last item. But we must not go negative.
+    if ($field_state['items_count'] > 0) {
+      $field_state['items_count']--;
+    }
+    else {
+      // Create a new field collection item after deleting the last one so the
+      // form will show a blank field collection item instead of resurrecting
+      // the first one if there was already data.
+      $field_state['entity'][0] = FieldCollectionItem::create(['field_name' => $field_name]);
+    }
+
+    // Fix the weights. Field UI lets the weights be in a range of
+    // (-1 * item_count) to (item_count). This means that when we remove one,
+    // the range shrinks; weights outside of that range then get set to
+    // the first item in the select by the browser, floating them to the top.
+    // We use a brute force method because we lost weights on both ends
+    // and if the user has moved things around, we have to cascade because
+    // if I have items weight weights 3 and 4, and I change 4 to 3 but leave
+    // the 3, the order of the two 3s now is undefined and may not match what
+    // the user had selected.
+    $input = NestedArray::getValue($form_state->getUserInput(), $address_state);
+    // Sort by weight.
+    uasort($input, '_field_collection_sort_items_helper');
+
+    // Reweight everything in the correct order.
+    $weight = -1 * $field_state['items_count'];
+    foreach ($input as $key => $item) {
+      if ($item) {
+        $input[$key]['_weight'] = $weight++;
+      }
+    }
+
+    $user_input = $form_state->getUserInput();
+    NestedArray::setValue($user_input, $address_state, $input);
+    $form_state->setUserInput($user_input);
+
+    static::setWidgetState($parents, $field_name, $form_state, $field_state);
+
+    $form_state->setRebuild();
   }
 
 }
